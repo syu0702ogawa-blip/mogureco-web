@@ -40,11 +40,16 @@
     return { ...record, lat: coords?.lat ?? null, lng: coords?.lng ?? null };
   }
 
+  function recordsWithValidCoordinates(records) {
+    return (records || []).map(record => ({ record, coords: recordCoordinates(record) })).filter(item => item.coords);
+  }
+
   return {
     parseCoordinate,
     coordinatesFromValues,
     recordCoordinates,
     googleMapsUrl,
     normalizeRecordCoordinates,
+    recordsWithValidCoordinates,
   };
 }));

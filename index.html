@@ -9,9 +9,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="assets/icon-192.png">
   <link rel="apple-touch-icon" href="assets/icon-192.png">
-  <link rel="preconnect" href="https://unpkg.com">
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
-  <link rel="stylesheet" href="styles.css?v=6">
+  <link rel="stylesheet" href="styles.css?v=7">
 </head>
 <body>
   <header class="app-header">
@@ -24,6 +22,11 @@
         <p>自分だけの外食記録</p>
       </div>
     </div>
+    <nav class="header-tabs" aria-label="メインメニュー">
+      <button class="nav-button active" data-view="records" type="button">記録</button>
+      <button class="nav-button" data-view="map" type="button">マップ</button>
+      <button class="nav-button" data-view="settings" type="button">設定</button>
+    </nav>
     <button id="installButton" class="ghost-button hidden" type="button">アプリとして追加</button>
   </header>
 
@@ -91,7 +94,7 @@
 
         <article class="settings-card">
           <h3>Googleの店舗画像・位置情報</h3>
-          <p>写真未登録の店には代表画像を表示し、店名と住所から正確な位置を取得します。Google CloudのAPIキーが未設定の場合、位置は町丁目付近の概算になることがあります。</p>
+          <p>写真未登録の店には代表画像を表示し、店名と住所から位置を取得します。地図・店舗検索・位置取得には、Google CloudでMaps JavaScript APIとPlaces API（New）を有効にしたAPIキーが必要です。</p>
           <label class="settings-field">Google Maps APIキー<input id="googleApiKeyInput" type="password" autocomplete="off" placeholder="AIza..."></label>
           <label class="toggle-row"><input id="googlePhotosEnabledInput" type="checkbox">写真未登録の店に自動表示する</label>
           <div id="googlePhotoStatus" class="setting-status">設定を確認しています...</div>
@@ -144,18 +147,6 @@
   <button id="addButton" class="fab" type="button" aria-label="新しい店を登録">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
   </button>
-
-  <nav class="bottom-nav" aria-label="メインメニュー">
-    <button class="nav-button active" data-view="timeline" type="button">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4zM8 3v4M16 3v4M4 9h16"/></svg><span>記録</span>
-    </button>
-    <button class="nav-button" data-view="map" type="button">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18-6 3V6l6-3 6 3 6-3v15l-6 3-6-3Zm0 0V3m6 18V6"/></svg><span>マップ</span>
-    </button>
-    <button class="nav-button" data-view="settings" type="button">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V21h-4v-.08A1.7 1.7 0 0 0 9 19.37a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.63 15 1.7 1.7 0 0 0 3.08 14H3v-4h.08A1.7 1.7 0 0 0 4.63 9a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.63 1.7 1.7 0 0 0 10 3.08V3h4v.08A1.7 1.7 0 0 0 15 4.63a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.37 9 1.7 1.7 0 0 0 20.92 10H21v4h-.08A1.7 1.7 0 0 0 19.4 15Z"/></svg><span>設定</span>
-    </button>
-  </nav>
 
   <dialog id="recordDialog" class="record-dialog">
     <form id="recordForm" method="dialog">
@@ -241,10 +232,11 @@
 
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
   <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script src="location-utils.js?v=1"></script>
-  <script src="app.js?v=6"></script>
+  <script src="navigation-utils.js?v=1"></script>
+  <script src="google-maps-loader.js?v=1"></script>
+  <script src="app.js?v=7"></script>
 </body>
 </html>

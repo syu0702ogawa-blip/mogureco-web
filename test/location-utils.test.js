@@ -55,3 +55,12 @@ test('legacy normalization preserves name, address, memo, photos and extra field
   assert.equal(normalized.lat, null);
   assert.equal(normalized.lng, null);
 });
+
+test('無効座標のレコードからマーカー候補を生成しない', () => {
+  const { recordsWithValidCoordinates } = require('../location-utils');
+  const records = [
+    { id: 'null', lat: null, lng: null }, { id: 'empty', lat: '', lng: '' },
+    { id: 'zero', lat: 0, lng: 0 }, { id: 'valid', lat: 43.0618, lng: 141.3545 },
+  ];
+  assert.deepEqual(recordsWithValidCoordinates(records).map(item => item.record.id), ['valid']);
+});

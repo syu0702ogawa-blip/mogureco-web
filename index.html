@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#9f3f2f">
+  <meta name="description" content="行った店・行きたい店を写真、評価、タグ、地図で記録する個人向け外食記録Webアプリ">
+  <title>外食レコ</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="assets/icon-192.png">
+  <link rel="apple-touch-icon" href="assets/icon-192.png">
+  <link rel="preconnect" href="https://unpkg.com">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+  <link rel="stylesheet" href="styles.css?v=4">
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand-wrap">
+      <div class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 48 48" role="img"><path d="M10 17c0-5 4-9 9-9h10c5 0 9 4 9 9v13c0 6-5 10-11 10h-6c-6 0-11-4-11-10V17Z"/><path d="M16 8c0-3 2-5 5-5M32 8c0-3-2-5-5-5"/></svg>
+      </div>
+      <div>
+        <h1>外食レコ</h1>
+        <p>自分だけの外食記録</p>
+      </div>
+    </div>
+    <button id="installButton" class="ghost-button hidden" type="button">アプリとして追加</button>
+  </header>
+
+  <main>
+    <section id="timelineView" class="view active" aria-labelledby="timelineTitle">
+      <div class="hero-panel">
+        <div>
+          <p class="eyebrow">MY RESTAURANT LOG</p>
+          <h2 id="timelineTitle">食べた記憶を、あとで探せる形に。</h2>
+        </div>
+        <div class="stats" aria-label="登録件数">
+          <div><strong id="statAll">0</strong><span>すべて</span></div>
+          <div><strong id="statVisited">0</strong><span>行った</span></div>
+          <div><strong id="statWishlist">0</strong><span>行きたい</span></div>
+        </div>
+      </div>
+
+      <div class="toolbar" role="search">
+        <label class="search-box">
+          <span class="sr-only">店名、住所、メモ、タグを検索</span>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m21 21-4.35-4.35m2.35-5.65a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z"/></svg>
+          <input id="searchInput" type="search" placeholder="店名・住所・メモ・タグで検索">
+        </label>
+        <div class="segmented" aria-label="表示対象">
+          <button class="filter-button active" data-filter="all" type="button">すべて</button>
+          <button class="filter-button" data-filter="visited" type="button">行った</button>
+          <button class="filter-button" data-filter="wishlist" type="button">行きたい</button>
+        </div>
+      </div>
+
+      <div id="activeTagFilter" class="active-filter hidden"></div>
+      <div id="timelineContainer" class="timeline-container"></div>
+    </section>
+
+    <section id="mapView" class="view" aria-labelledby="mapTitle">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">MY MAP</p>
+          <h2 id="mapTitle">登録した店の地図</h2>
+        </div>
+        <div class="button-row">
+          <button id="repairLocationsButton" class="secondary-button hidden" type="button">位置を取得</button>
+          <button id="locateButton" class="secondary-button" type="button">現在地へ</button>
+        </div>
+      </div>
+      <div id="map" class="map-canvas" aria-label="登録店舗の地図"></div>
+      <p id="mapNotice" class="map-notice hidden"></p>
+    </section>
+
+    <section id="settingsView" class="view" aria-labelledby="settingsTitle">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">DATA & SETTINGS</p>
+          <h2 id="settingsTitle">データ管理</h2>
+        </div>
+      </div>
+
+      <div class="settings-grid">
+        <article class="settings-card">
+          <h3>保存状態</h3>
+          <p>記録はこのブラウザーのIndexedDBに保存されます。同じURLで開く限り、ブラウザーを閉じても残ります。</p>
+          <div id="storageStatus" class="setting-status">保存状態を確認しています...</div>
+          <button id="requestPersistenceButton" class="secondary-button" type="button">保存領域を固定する</button>
+        </article>
+
+        <article class="settings-card">
+          <h3>Googleの店舗画像・位置情報</h3>
+          <p>写真未登録の店には代表画像を表示し、店名と住所から正確な位置を取得します。Google CloudのAPIキーが未設定の場合、位置は町丁目付近の概算になることがあります。</p>
+          <label class="settings-field">Google Maps APIキー<input id="googleApiKeyInput" type="password" autocomplete="off" placeholder="AIza..."></label>
+          <label class="toggle-row"><input id="googlePhotosEnabledInput" type="checkbox">写真未登録の店に自動表示する</label>
+          <div id="googlePhotoStatus" class="setting-status">設定を確認しています...</div>
+          <div class="button-row">
+            <button id="saveGoogleSettingsButton" class="primary-button" type="button">設定を保存</button>
+            <button id="clearGoogleSettingsButton" class="secondary-button" type="button">設定を削除</button>
+          </div>
+        </article>
+
+        <article class="settings-card">
+          <h3>バックアップ</h3>
+          <p>登録内容と写真を1つのJSONファイルに保存します。ブラウザーのデータ消去に備えて定期的に保存してください。</p>
+          <div class="button-row">
+            <button id="exportButton" class="primary-button" type="button">バックアップを保存</button>
+            <label class="file-button secondary-button">バックアップを復元<input id="jsonImportInput" type="file" accept="application/json,.json"></label>
+          </div>
+        </article>
+
+        <article class="settings-card">
+          <h3>もぐレコのデータを取り込む</h3>
+          <p>公式アプリから出力したCSVと画像ZIPを読み込みます。CSVの項目名を自動判定し、写真名が記録と対応している場合は写真も紐付けます。</p>
+          <div class="import-fields">
+            <label>CSVファイル<input id="mogurecoCsvInput" type="file" accept="text/csv,.csv"></label>
+            <label>画像ZIP（任意）<input id="mogurecoZipInput" type="file" accept="application/zip,.zip"></label>
+          </div>
+          <button id="mogurecoImportButton" class="primary-button" type="button">取り込みを開始</button>
+          <div id="importResult" class="import-result hidden" role="status"></div>
+        </article>
+
+        <article class="settings-card">
+          <h3>CSV出力</h3>
+          <p>表計算ソフトで確認できる形式で、店名・住所・日付・評価・タグ・メモを出力します。写真は含まれません。</p>
+          <button id="csvExportButton" class="secondary-button" type="button">CSVを保存</button>
+        </article>
+
+        <article class="settings-card danger-zone">
+          <h3>全データ削除</h3>
+          <p>このブラウザーに保存されている記録と写真をすべて削除します。元に戻せません。</p>
+          <button id="deleteAllButton" class="danger-button" type="button">全データを削除</button>
+        </article>
+      </div>
+
+      <div class="privacy-note">
+        <strong>保存場所</strong>
+        <p>登録データはこの端末のブラウザー内に保存され、外食レコ独自のサーバーには送信されません。店舗検索と地図表示では外部の地図サービスへ通信します。</p>
+      </div>
+    </section>
+  </main>
+
+  <button id="addButton" class="fab" type="button" aria-label="新しい店を登録">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+  </button>
+
+  <nav class="bottom-nav" aria-label="メインメニュー">
+    <button class="nav-button active" data-view="timeline" type="button">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4zM8 3v4M16 3v4M4 9h16"/></svg><span>記録</span>
+    </button>
+    <button class="nav-button" data-view="map" type="button">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18-6 3V6l6-3 6 3 6-3v15l-6 3-6-3Zm0 0V3m6 18V6"/></svg><span>マップ</span>
+    </button>
+    <button class="nav-button" data-view="settings" type="button">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V21h-4v-.08A1.7 1.7 0 0 0 9 19.37a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.63 15 1.7 1.7 0 0 0 3.08 14H3v-4h.08A1.7 1.7 0 0 0 4.63 9a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.63 1.7 1.7 0 0 0 10 3.08V3h4v.08A1.7 1.7 0 0 0 15 4.63a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.37 9 1.7 1.7 0 0 0 20.92 10H21v4h-.08A1.7 1.7 0 0 0 19.4 15Z"/></svg><span>設定</span>
+    </button>
+  </nav>
+
+  <dialog id="recordDialog" class="record-dialog">
+    <form id="recordForm" method="dialog">
+      <div class="dialog-header">
+        <div>
+          <p class="eyebrow">RESTAURANT</p>
+          <h2 id="recordDialogTitle">店を登録</h2>
+        </div>
+        <button class="icon-button close-dialog" type="button" aria-label="閉じる">×</button>
+      </div>
+
+      <input id="recordId" type="hidden">
+      <div class="form-section">
+        <label class="field-label" for="placeSearchInput">店を検索</label>
+        <div class="place-search-row">
+          <input id="placeSearchInput" type="search" placeholder="例：札幌駅 ラーメン">
+          <button id="placeSearchButton" class="secondary-button" type="button">検索</button>
+          <button id="nearbySearchButton" class="secondary-button" type="button">現在地周辺</button>
+        </div>
+        <div id="placeSearchResults" class="place-results hidden"></div>
+      </div>
+
+      <div class="form-grid">
+        <label class="full-width">店名<span class="required">必須</span><input id="nameInput" name="name" required maxlength="100"></label>
+        <label class="full-width">住所<input id="addressInput" name="address" maxlength="200"></label>
+        <label>区分<select id="statusInput" name="status"><option value="visited">行った</option><option value="wishlist">行きたい</option></select></label>
+        <label>日付<input id="dateInput" name="date" type="date"></label>
+        <label>ジャンル<input id="categoryInput" name="category" placeholder="居酒屋、ラーメンなど" maxlength="40"></label>
+        <label>金額<input id="priceInput" name="price" inputmode="numeric" placeholder="3000" maxlength="12"></label>
+        <label class="full-width">タグ<input id="tagsInput" name="tags" placeholder="デート, 一人飯, また行く"></label>
+      </div>
+
+      <fieldset class="rating-fieldset">
+        <legend>評価</legend>
+        <div id="ratingButtons" class="rating-buttons" aria-label="5段階評価">
+          <button type="button" data-rating="1" aria-label="1点">★</button>
+          <button type="button" data-rating="2" aria-label="2点">★</button>
+          <button type="button" data-rating="3" aria-label="3点">★</button>
+          <button type="button" data-rating="4" aria-label="4点">★</button>
+          <button type="button" data-rating="5" aria-label="5点">★</button>
+          <button id="clearRatingButton" class="clear-rating" type="button">評価なし</button>
+        </div>
+        <input id="ratingInput" type="hidden" value="0">
+      </fieldset>
+
+      <label class="memo-label">メモ<textarea id="memoInput" name="memo" rows="5" maxlength="3000" placeholder="食べたもの、感想、次回頼みたいものなど"></textarea></label>
+
+      <div class="photo-section">
+        <div class="photo-section-heading">
+          <label class="field-label">写真（最大10枚）</label>
+          <label class="file-button secondary-button small">写真を選択<input id="photoInput" type="file" accept="image/*" multiple></label>
+        </div>
+        <div id="photoPreview" class="photo-preview"></div>
+      </div>
+
+      <input id="latInput" type="hidden">
+      <input id="lngInput" type="hidden">
+
+      <div class="dialog-actions">
+        <button class="secondary-button close-dialog" type="button">キャンセル</button>
+        <button id="saveRecordButton" class="primary-button" type="submit">保存</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="detailDialog" class="detail-dialog">
+    <div class="detail-shell">
+      <button class="icon-button close-detail" type="button" aria-label="閉じる">×</button>
+      <div id="detailContent"></div>
+    </div>
+  </dialog>
+
+  <dialog id="confirmDialog" class="confirm-dialog">
+    <form method="dialog">
+      <h2 id="confirmTitle">確認</h2>
+      <p id="confirmMessage"></p>
+      <div class="dialog-actions">
+        <button id="confirmCancel" class="secondary-button" value="cancel">キャンセル</button>
+        <button id="confirmOk" class="danger-button" value="ok">実行</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <script src="app.js?v=5"></script>
+</body>
+</html>

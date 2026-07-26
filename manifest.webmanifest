@@ -1,0 +1,14 @@
+{
+  "name": "外食レコ",
+  "short_name": "外食レコ",
+  "description": "行った店・行きたい店を写真、評価、タグ、地図で記録するWebアプリ",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f7f3ee",
+  "theme_color": "#9f3f2f",
+  "lang": "ja",
+  "icons": [
+    { "src": "assets/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "assets/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

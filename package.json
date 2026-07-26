@@ -1,0 +1,7 @@
+{
+  "name": "mogureco-web",
+  "private": true,
+  "scripts": {
+    "test": "node --test"
+  }
+}

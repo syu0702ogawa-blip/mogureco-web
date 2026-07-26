@@ -1,9 +1,11 @@
-const CACHE = 'gaishoku-reco-v5';
+const CACHE_PREFIX = 'gaishoku-reco-';
+const CACHE = `${CACHE_PREFIX}v6`;
 const SHELL = [
   './',
   './index.html',
-  './styles.css?v=5',
-  './app.js?v=5',
+  './styles.css?v=6',
+  './location-utils.js?v=1',
+  './app.js?v=6',
   './manifest.webmanifest',
   './assets/icon-192.png',
   './assets/icon-512.png'
@@ -20,7 +22,7 @@ self.addEventListener('install', event => {
 self.addEventListener('activate', event => {
   event.waitUntil(
     caches.keys()
-      .then(keys => Promise.all(keys.filter(key => key !== CACHE).map(key => caches.delete(key))))
+      .then(keys => Promise.all(keys.filter(key => key.startsWith(CACHE_PREFIX) && key !== CACHE).map(key => caches.delete(key))))
       .then(() => self.clients.claim())
   );
 });
@@ -34,10 +36,11 @@ self.addEventListener('fetch', event => {
   if (event.request.mode === 'navigate') {
     event.respondWith(
       fetch(event.request)
-        .then(response => {
+        .then(async response => {
           if (response.ok) {
             const copy = response.clone();
-            caches.open(CACHE).then(cache => cache.put('./index.html', copy));
+            const cache = await caches.open(CACHE);
+            await cache.put('./index.html', copy);
           }
           return response;
         })
@@ -48,10 +51,11 @@ self.addEventListener('fetch', event => {
 
   event.respondWith(
     fetch(event.request)
-      .then(response => {
+      .then(async response => {
         if (response.ok) {
           const copy = response.clone();
-          caches.open(CACHE).then(cache => cache.put(event.request, copy));
+          const cache = await caches.open(CACHE);
+          await cache.put(event.request, copy);
         }
         return response;
       })

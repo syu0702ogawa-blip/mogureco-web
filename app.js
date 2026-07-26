@@ -8,6 +8,12 @@ const MAX_PHOTOS = 10;
 const GOOGLE_API_KEY_STORAGE = 'gaishoku-reco-google-api-key';
 const GOOGLE_PHOTOS_ENABLED_STORAGE = 'gaishoku-reco-google-photos-enabled';
 const GEOLONIA_GEOCODER_URL = 'https://cdn.geolonia.com/community-geocoder.js';
+const {
+  coordinatesFromValues,
+  recordCoordinates,
+  googleMapsUrl,
+  normalizeRecordCoordinates,
+} = window.LocationUtils;
 
 const state = {
   db: null,
@@ -50,34 +56,6 @@ function normalizeText(value = '') {
 function parseTags(value) {
   if (Array.isArray(value)) return value.map(v => String(v).trim()).filter(Boolean);
   return String(value || '').split(/[,、，\n]/).map(v => v.trim()).filter(Boolean);
-}
-
-function parseCoordinate(value, min, max) {
-  if (value === null || value === undefined) return null;
-  if (typeof value === 'string' && !value.trim()) return null;
-  const number = Number(value);
-  return Number.isFinite(number) && number >= min && number <= max ? number : null;
-}
-
-function coordinatesFromValues(latValue, lngValue) {
-  const lat = parseCoordinate(latValue, -90, 90);
-  const lng = parseCoordinate(lngValue, -180, 180);
-  if (lat === null || lng === null) return null;
-  // 空欄をNumber変換した旧版で作られた 0,0 は未設定として扱う。
-  if (lat === 0 && lng === 0) return null;
-  return { lat, lng };
-}
-
-function recordCoordinates(record) {
-  return coordinatesFromValues(record?.lat, record?.lng);
-}
-
-function googleMapsUrl(record) {
-  const coords = recordCoordinates(record);
-  const query = coords
-    ? `${coords.lat},${coords.lng}`
-    : [record?.name, record?.address].filter(Boolean).join(' ') || '飲食店';
-  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
 }
 
 function wait(ms) {
@@ -246,6 +224,11 @@ function loadGoogleMapsApi() {
       reject(new Error('Google Maps APIを読み込めませんでした'));
     };
     document.head.appendChild(script);
+  }).catch(error => {
+    // A temporary loading failure must not poison every later geocoding request.
+    state.googleMapsPromise = null;
+    document.querySelector('#googleMapsApiScript')?.remove();
+    throw error;
   });
   return state.googleMapsPromise;
 }
@@ -284,7 +267,12 @@ async function fetchGooglePlace(record) {
   });
 
   state.googlePlaceRequests.set(cacheKey, promise);
-  return promise;
+  try {
+    return await promise;
+  } finally {
+    // Deduplicate concurrent calls only; later attempts must recover from transient failures.
+    state.googlePlaceRequests.delete(cacheKey);
+  }
 }
 
 function googlePhotoAttribution(photo, place) {
@@ -832,18 +820,32 @@ function loadCommunityGeocoder() {
       : reject(new Error('日本住所ジオコーダーを初期化できませんでした'));
     script.onerror = () => reject(new Error('日本住所ジオコーダーを読み込めませんでした'));
     document.head.appendChild(script);
+  }).catch(error => {
+    // Allow a retry after a transient CDN or network failure.
+    state.communityGeocoderPromise = null;
+    throw error;
   });
   return state.communityGeocoderPromise;
 }
 
 async function geocodeWithGoogle(address, name = '') {
   if (!googleMapsConfigured()) return null;
-  const place = await fetchGooglePlace({
+  let place = await fetchGooglePlace({
     id: `geocode:${normalizeText(name)}:${normalizeText(address)}`,
     name,
     address,
     updatedAt: '',
   });
+  // A decorated/old shop name can make the combined query fail; an address-only
+  // query is a safer second attempt and still returns an exact Places location.
+  if (!place && name) {
+    place = await fetchGooglePlace({
+      id: `geocode-address:${normalizeText(address)}`,
+      name: '',
+      address,
+      updatedAt: '',
+    });
+  }
   const coords = coordinatesFromGoogleLocation(place?.location);
   return coords ? { ...coords, source: 'google', accuracy: 'place' } : null;
 }
@@ -853,30 +855,39 @@ async function geocodeWithCommunity(address) {
   if (!cleanAddress) return null;
   try {
     const getLatLng = await loadCommunityGeocoder();
-    const result = await new Promise(resolve => {
-      let settled = false;
-      const finish = value => {
-        if (settled) return;
-        settled = true;
-        resolve(value || null);
-      };
-      const timer = setTimeout(() => finish(null), 15000);
-      try {
-        getLatLng(
-          cleanAddress,
-          value => { clearTimeout(timer); finish(value); },
-          () => { clearTimeout(timer); finish(null); }
-        );
-      } catch (error) {
-        clearTimeout(timer);
-        console.error('Community geocoder error:', error);
-        finish(null);
+    const candidates = [...new Set([
+      cleanAddress,
+      // Imported addresses often append a building name or floor after whitespace.
+      cleanAddress.replace(/\s+(?:[^\s]*ビル|[^\s]* Building|[^\s]*マンション|[^\s]*タワー)?\s*\d*(?:F|階|号室)?.*$/i, '').trim(),
+    ].filter(Boolean))];
+    for (const candidate of candidates) {
+      const result = await new Promise(resolve => {
+        let settled = false;
+        const finish = value => {
+          if (settled) return;
+          settled = true;
+          resolve(value || null);
+        };
+        const timer = setTimeout(() => finish(null), 15000);
+        try {
+          getLatLng(
+            candidate,
+            value => { clearTimeout(timer); finish(value); },
+            () => { clearTimeout(timer); finish(null); }
+          );
+        } catch (error) {
+          clearTimeout(timer);
+          console.error('Community geocoder error:', error);
+          finish(null);
+        }
+      });
+      const coords = coordinatesFromValues(result?.lat, result?.lng);
+      // 市区町村や都道府県の代表点は飲食店のピンとして粗すぎるため、町丁目まで判別できた場合だけ採用する。
+      if (coords && Number(result?.level) >= 3) {
+        return { ...coords, source: 'geolonia', accuracy: 'town' };
       }
-    });
-    const coords = coordinatesFromValues(result?.lat, result?.lng);
-    // 市区町村や都道府県の代表点は飲食店のピンとして粗すぎるため、町丁目まで判別できた場合だけ採用する。
-    if (!coords || Number(result?.level) < 3) return null;
-    return { ...coords, source: 'geolonia', accuracy: 'town' };
+    }
+    return null;
   } catch (error) {
     console.error('Community geocoder load error:', error);
     return null;
@@ -1346,11 +1357,10 @@ function setupEvents() {
 async function normalizeStoredCoordinates() {
   const records = await dbGetAll();
   for (const record of records) {
-    const coords = recordCoordinates(record);
-    const lat = coords?.lat ?? null;
-    const lng = coords?.lng ?? null;
-    if (record.lat !== lat || record.lng !== lng) {
-      await dbPut({ ...record, lat, lng });
+    const normalized = normalizeRecordCoordinates(record);
+    if (record.lat !== normalized.lat || record.lng !== normalized.lng) {
+      // Spread-based normalization changes coordinates only and preserves all legacy fields/photos.
+      await dbPut(normalized);
     }
   }
 }
@@ -1363,7 +1373,11 @@ async function init() {
     await normalizeStoredCoordinates();
     await refreshRecords();
     await updateStorageStatus();
-    if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('./sw.js').catch(console.warn);
+    if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+      navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' })
+        .then(registration => registration.update())
+        .catch(console.warn);
+    }
   } catch (error) {
     console.error(error);
     document.body.innerHTML = '<main><div class="empty-state"><h2>アプリを起動できませんでした</h2><p>ブラウザーのプライベートモードや保存設定を確認してください。</p></div></main>';

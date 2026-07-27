@@ -3,23 +3,31 @@
 const DB_NAME = 'gaishoku-reco-db';
 const DB_VERSION = 1;
 const STORE_NAME = 'records';
-const DEFAULT_CENTER = [43.0618, 141.3545];
+const DEFAULT_CENTER = { lat: 43.0618, lng: 141.3545 };
 const MAX_PHOTOS = 10;
 const GOOGLE_API_KEY_STORAGE = 'gaishoku-reco-google-api-key';
 const GOOGLE_PHOTOS_ENABLED_STORAGE = 'gaishoku-reco-google-photos-enabled';
 const GEOLONIA_GEOCODER_URL = 'https://cdn.geolonia.com/community-geocoder.js';
+const {
+  coordinatesFromValues,
+  recordCoordinates,
+  googleMapsUrl,
+  normalizeRecordCoordinates,
+  recordsWithValidCoordinates,
+} = window.LocationUtils;
 
 const state = {
   db: null,
   records: [],
-  currentView: 'timeline',
+  currentView: 'records',
   filter: 'all',
   query: '',
   tagFilter: '',
   selectedPhotos: [],
   editingId: null,
   map: null,
-  mapLayer: null,
+  mapMarkers: [],
+  currentLocationMarker: null,
   detailMap: null,
   deferredInstallPrompt: null,
   galleryIndex: 0,
@@ -29,6 +37,7 @@ const state = {
   googlePhotoObserver: null,
   googlePhotoErrorShown: false,
   communityGeocoderPromise: null,
+  detailHistoryActive: false,
   geocodingInProgress: false,
 };
 
@@ -50,34 +59,6 @@ function normalizeText(value = '') {
 function parseTags(value) {
   if (Array.isArray(value)) return value.map(v => String(v).trim()).filter(Boolean);
   return String(value || '').split(/[,、，\n]/).map(v => v.trim()).filter(Boolean);
-}
-
-function parseCoordinate(value, min, max) {
-  if (value === null || value === undefined) return null;
-  if (typeof value === 'string' && !value.trim()) return null;
-  const number = Number(value);
-  return Number.isFinite(number) && number >= min && number <= max ? number : null;
-}
-
-function coordinatesFromValues(latValue, lngValue) {
-  const lat = parseCoordinate(latValue, -90, 90);
-  const lng = parseCoordinate(lngValue, -180, 180);
-  if (lat === null || lng === null) return null;
-  // 空欄をNumber変換した旧版で作られた 0,0 は未設定として扱う。
-  if (lat === 0 && lng === 0) return null;
-  return { lat, lng };
-}
-
-function recordCoordinates(record) {
-  return coordinatesFromValues(record?.lat, record?.lng);
-}
-
-function googleMapsUrl(record) {
-  const coords = recordCoordinates(record);
-  const query = coords
-    ? `${coords.lat},${coords.lng}`
-    : [record?.name, record?.address].filter(Boolean).join(' ') || '飲食店';
-  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
 }
 
 function wait(ms) {
@@ -223,31 +204,12 @@ function clearGoogleSettings() {
   setTimeout(() => location.reload(), 450);
 }
 
+const googleMapsLoader = window.GoogleMapsLoader.createGoogleMapsLoader({
+  window, document, getApiKey: getGoogleApiKey,
+});
+
 function loadGoogleMapsApi() {
-  if (!googleMapsConfigured()) return Promise.reject(new Error('Google Maps APIキーが未設定です'));
-  if (window.google?.maps?.importLibrary) return Promise.resolve(window.google.maps);
-  if (state.googleMapsPromise) return state.googleMapsPromise;
-  const key = getGoogleApiKey();
-  state.googleMapsPromise = new Promise((resolve, reject) => {
-    const callbackName = '__gaishokuRecoGoogleMapsReady';
-    const timeout = setTimeout(() => reject(new Error('Google Maps APIの読み込みがタイムアウトしました')), 15000);
-    window[callbackName] = () => {
-      clearTimeout(timeout);
-      delete window[callbackName];
-      resolve(window.google.maps);
-    };
-    const script = document.createElement('script');
-    script.id = 'googleMapsApiScript';
-    script.async = true;
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&loading=async&libraries=places&language=ja&region=JP&v=weekly&callback=${callbackName}`;
-    script.onerror = () => {
-      clearTimeout(timeout);
-      delete window[callbackName];
-      reject(new Error('Google Maps APIを読み込めませんでした'));
-    };
-    document.head.appendChild(script);
-  });
-  return state.googleMapsPromise;
+  return googleMapsLoader.load();
 }
 
 function coordinatesFromGoogleLocation(location) {
@@ -284,7 +246,12 @@ async function fetchGooglePlace(record) {
   });
 
   state.googlePlaceRequests.set(cacheKey, promise);
-  return promise;
+  try {
+    return await promise;
+  } finally {
+    // Deduplicate concurrent calls only; later attempts must recover from transient failures.
+    state.googlePlaceRequests.delete(cacheKey);
+  }
 }
 
 function googlePhotoAttribution(photo, place) {
@@ -527,80 +494,79 @@ function recordCardHtml(record) {
     </article>`;
 }
 
-function setView(view) {
+function applyView(view, recordId = null) {
   state.currentView = view;
-  $$('.view').forEach(section => section.classList.toggle('active', section.id === `${view}View`));
-  $$('.nav-button').forEach(button => button.classList.toggle('active', button.dataset.view === view));
+  const sectionId = view === 'records' ? 'timelineView' : `${view}View`;
+  $$('.view').forEach(section => section.classList.toggle('active', section.id === sectionId));
+  $$('.nav-button').forEach(button => {
+    const active = button.dataset.view === view;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-current', active ? 'page' : 'false');
+  });
   $('#addButton').classList.toggle('hidden', view === 'settings');
-  if (view === 'map') {
-    setTimeout(() => {
-      initMap();
-      state.map.invalidateSize();
-      renderMapMarkers();
-    }, 30);
+  if (view === 'map') setTimeout(initMap, 30);
+  if (recordId && !$('#detailDialog').open) void openDetail(recordId, { fromHistory: true });
+  if (!recordId && $('#detailDialog').open) $('#detailDialog').close();
+}
+
+const router = window.NavigationUtils.createRouter({ location, history, render: applyView });
+function setView(view) { router.navigate(view === 'timeline' ? 'records' : view); }
+
+function mapSetupMessage(message, showSettings = false) {
+  const map = $('#map');
+  map.innerHTML = `<div class="map-empty"><strong>${escapeHtml(message)}</strong>${showSettings ? '<button class="primary-button" data-open-settings type="button">設定画面を開く</button>' : ''}</div>`;
+  map.querySelector('[data-open-settings]')?.addEventListener('click', () => setView('settings'));
+}
+
+async function initMap() {
+  if (!googleMapsConfigured()) {
+    state.map = null;
+    mapSetupMessage('Google Mapsを表示するには、設定画面でAPIキーを保存してください。', true);
+    renderMapNotice();
+    return;
   }
-  window.scrollTo({ top: 0, behavior: 'smooth' });
+  try {
+    await loadGoogleMapsApi();
+    const { Map } = await google.maps.importLibrary('maps');
+    if (!state.map) state.map = new Map($('#map'), { center: DEFAULT_CENTER, zoom: 12, mapTypeControl: false, streetViewControl: false });
+    await renderMapMarkers();
+  } catch (error) {
+    console.error(error);
+    state.map = null;
+    mapSetupMessage('Google Mapsを読み込めませんでした。APIキーとGoogle Cloudの設定を確認して再試行してください。');
+  }
 }
 
-function initMap() {
-  if (state.map) return;
-  state.map = L.map('map', { zoomControl: true }).setView(DEFAULT_CENTER, 12);
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 19,
-    attribution: '&copy; OpenStreetMap contributors'
-  }).addTo(state.map);
-  state.mapLayer = L.layerGroup().addTo(state.map);
-}
-
-function markerIcon(status) {
-  return L.divIcon({
-    className: '',
-    html: `<div class="custom-marker ${status === 'wishlist' ? 'wishlist' : ''}"><div class="marker-inner">${status === 'wishlist' ? '行' : '済'}</div></div>`,
-    iconSize: [32, 32], iconAnchor: [16, 31], popupAnchor: [0, -30]
-  });
-}
-
-function renderMapMarkers() {
-  if (!state.map || !state.mapLayer) return;
-  state.mapLayer.clearLayers();
-  const plotted = state.records
-    .map(record => ({ record, coords: recordCoordinates(record) }))
-    .filter(item => item.coords);
-
-  plotted.forEach(({ record, coords }) => {
-    const marker = L.marker([coords.lat, coords.lng], { icon: markerIcon(record.status) });
-    marker.bindPopup(`<div class="map-popup"><h4>${escapeHtml(record.name)}</h4><p>${escapeHtml(record.address || statusLabel(record.status))}</p><button type="button" data-map-record="${escapeHtml(record.id)}">詳細を見る</button></div>`);
-    marker.on('popupopen', event => {
-      const button = event.popup.getElement()?.querySelector('[data-map-record]');
-      button?.addEventListener('click', () => openDetail(record.id), { once: true });
-    });
-    marker.addTo(state.mapLayer);
-  });
-
+function renderMapNotice() {
   const notice = $('#mapNotice');
   const repairButton = $('#repairLocationsButton');
   const missing = state.records.filter(record => !recordCoordinates(record));
   const repairable = missing.filter(record => record.address);
-  const locationProvider = googleMapsConfigured() ? 'Google Places' : '無料住所検索（町丁目の概算位置）';
-  if (missing.length > 0) {
-    notice.textContent = repairable.length
-      ? `位置を取得できていない記録が${missing.length}件あります。住所がある${repairable.length}件は「位置を取得」で補完できます。使用：${locationProvider}`
-      : `位置を取得できていない記録が${missing.length}件あります。住所を登録してください。`;
+  if (missing.length) {
+    notice.textContent = repairable.length ? `位置未取得が${missing.length}件あります。住所がある${repairable.length}件は「位置を取得」で補完できます。` : `位置未取得が${missing.length}件あります。住所を登録してください。`;
     notice.classList.remove('hidden');
-  } else {
-    notice.classList.add('hidden');
-  }
-  if (repairButton) {
-    repairButton.classList.toggle('hidden', repairable.length === 0);
-    repairButton.disabled = state.geocodingInProgress;
-  }
+  } else notice.classList.add('hidden');
+  repairButton?.classList.toggle('hidden', repairable.length === 0);
+  if (repairButton) repairButton.disabled = state.geocodingInProgress;
+}
 
-  if (plotted.length) {
-    const bounds = L.latLngBounds(plotted.map(item => [item.coords.lat, item.coords.lng]));
-    state.map.fitBounds(bounds, { padding: [45, 45], maxZoom: 15 });
-  } else {
-    state.map.setView(DEFAULT_CENTER, 12);
-  }
+async function renderMapMarkers() {
+  renderMapNotice();
+  if (!state.map || !window.google?.maps) return;
+  state.mapMarkers.forEach(marker => marker.setMap(null));
+  state.mapMarkers = [];
+  const plotted = recordsWithValidCoordinates(state.records);
+  const bounds = new google.maps.LatLngBounds();
+  plotted.forEach(({ record, coords }) => {
+    const marker = new google.maps.Marker({ map: state.map, position: coords, title: record.name });
+    const info = new google.maps.InfoWindow({ content: `<div class="map-popup"><h4>${escapeHtml(record.name)}</h4><p>${escapeHtml(record.address || '住所未登録')}</p><p class="rating">${escapeHtml(starText(record.rating))}</p><button type="button" data-map-record="${escapeHtml(record.id)}">詳細を見る</button></div>` });
+    marker.addListener('click', () => {
+      info.open({ map: state.map, anchor: marker });
+      google.maps.event.addListenerOnce(info, 'domready', () => document.querySelector(`[data-map-record="${CSS.escape(record.id)}"]`)?.addEventListener('click', () => openDetail(record.id)));
+    });
+    state.mapMarkers.push(marker); bounds.extend(coords);
+  });
+  if (plotted.length) state.map.fitBounds(bounds, 56); else { state.map.setCenter(DEFAULT_CENTER); state.map.setZoom(12); }
 }
 
 async function repairMissingCoordinates() {
@@ -760,43 +726,28 @@ async function handlePhotos(files) {
 async function searchPlaces(query, near = null) {
   const resultsBox = $('#placeSearchResults');
   resultsBox.classList.remove('hidden');
+  if (!googleMapsConfigured()) {
+    resultsBox.innerHTML = '<div class="place-result"><strong>Google Maps APIキーが未設定です</strong><span>設定画面でキーを保存するか、店名と住所を手入力してください。</span></div>';
+    return;
+  }
   resultsBox.innerHTML = '<div class="place-result"><strong>検索中...</strong></div>';
   try {
-    let url;
-    if (near) {
-      const [lat, lon] = near;
-      const delta = 0.006;
-      const viewbox = `${lon - delta},${lat + delta},${lon + delta},${lat - delta}`;
-      url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=10&accept-language=ja&countrycodes=jp&bounded=1&viewbox=${encodeURIComponent(viewbox)}&q=${encodeURIComponent(query || 'restaurant')}`;
-    } else {
-      url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=10&accept-language=ja&countrycodes=jp&q=${encodeURIComponent(query)}`;
-    }
-    const response = await fetch(url, { headers: { 'Accept': 'application/json' } });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const data = await response.json();
-    if (!data.length) {
-      resultsBox.innerHTML = '<div class="place-result"><strong>候補が見つかりませんでした</strong><span>店名や地域名を変えてください。</span></div>';
-      return;
-    }
-    resultsBox.innerHTML = data.map((place, index) => {
-      const parts = place.display_name?.split(',') || [];
-      const name = place.name || parts[0] || '名称不明';
-      return `<button class="place-result" type="button" data-place-index="${index}"><strong>${escapeHtml(name)}</strong><span>${escapeHtml(place.display_name || '')}</span></button>`;
-    }).join('');
+    await loadGoogleMapsApi();
+    const { Place } = await google.maps.importLibrary('places');
+    const request = { textQuery: query, fields: ['displayName','formattedAddress','location'], maxResultCount: 10, language: 'ja', region: 'JP' };
+    if (near) request.locationBias = { center: { lat: near[0], lng: near[1] }, radius: 5000 };
+    const { places = [] } = await Place.searchByText(request);
+    if (!places.length) { resultsBox.innerHTML = '<div class="place-result"><strong>候補が見つかりませんでした</strong></div>'; return; }
+    resultsBox.innerHTML = places.map((place, index) => `<button class="place-result" type="button" data-place-index="${index}"><strong>${escapeHtml(place.displayName || '名称不明')}</strong><span>${escapeHtml(place.formattedAddress || '')}</span></button>`).join('');
     $$('[data-place-index]', resultsBox).forEach(button => button.addEventListener('click', () => {
-      const place = data[Number(button.dataset.placeIndex)];
-      const parts = place.display_name?.split(',') || [];
-      $('#nameInput').value = place.name || parts[0] || '';
-      $('#addressInput').value = place.display_name || '';
-      $('#latInput').value = place.lat || '';
-      $('#lngInput').value = place.lon || '';
-      resultsBox.classList.add('hidden');
-      showToast('店名と住所を入力しました');
+      const place = places[Number(button.dataset.placeIndex)];
+      const coords = coordinatesFromGoogleLocation(place.location);
+      $('#nameInput').value = place.displayName || '';
+      $('#addressInput').value = place.formattedAddress || '';
+      $('#latInput').value = coords?.lat ?? ''; $('#lngInput').value = coords?.lng ?? '';
+      resultsBox.classList.add('hidden'); showToast('店名と住所を入力しました');
     }));
-  } catch (error) {
-    console.error(error);
-    resultsBox.innerHTML = '<div class="place-result"><strong>店舗検索に失敗しました</strong><span>通信状態を確認し、店名と住所を手入力してください。</span></div>';
-  }
+  } catch (error) { console.error(error); resultsBox.innerHTML = '<div class="place-result"><strong>Google店舗検索に失敗しました</strong><span>APIキーとGoogle Cloudの設定を確認してください。</span></div>'; }
 }
 
 function getCurrentPosition() {
@@ -832,18 +783,32 @@ function loadCommunityGeocoder() {
       : reject(new Error('日本住所ジオコーダーを初期化できませんでした'));
     script.onerror = () => reject(new Error('日本住所ジオコーダーを読み込めませんでした'));
     document.head.appendChild(script);
+  }).catch(error => {
+    // Allow a retry after a transient CDN or network failure.
+    state.communityGeocoderPromise = null;
+    throw error;
   });
   return state.communityGeocoderPromise;
 }
 
 async function geocodeWithGoogle(address, name = '') {
   if (!googleMapsConfigured()) return null;
-  const place = await fetchGooglePlace({
+  let place = await fetchGooglePlace({
     id: `geocode:${normalizeText(name)}:${normalizeText(address)}`,
     name,
     address,
     updatedAt: '',
   });
+  // A decorated/old shop name can make the combined query fail; an address-only
+  // query is a safer second attempt and still returns an exact Places location.
+  if (!place && name) {
+    place = await fetchGooglePlace({
+      id: `geocode-address:${normalizeText(address)}`,
+      name: '',
+      address,
+      updatedAt: '',
+    });
+  }
   const coords = coordinatesFromGoogleLocation(place?.location);
   return coords ? { ...coords, source: 'google', accuracy: 'place' } : null;
 }
@@ -853,30 +818,39 @@ async function geocodeWithCommunity(address) {
   if (!cleanAddress) return null;
   try {
     const getLatLng = await loadCommunityGeocoder();
-    const result = await new Promise(resolve => {
-      let settled = false;
-      const finish = value => {
-        if (settled) return;
-        settled = true;
-        resolve(value || null);
-      };
-      const timer = setTimeout(() => finish(null), 15000);
-      try {
-        getLatLng(
-          cleanAddress,
-          value => { clearTimeout(timer); finish(value); },
-          () => { clearTimeout(timer); finish(null); }
-        );
-      } catch (error) {
-        clearTimeout(timer);
-        console.error('Community geocoder error:', error);
-        finish(null);
+    const candidates = [...new Set([
+      cleanAddress,
+      // Imported addresses often append a building name or floor after whitespace.
+      cleanAddress.replace(/\s+(?:[^\s]*ビル|[^\s]* Building|[^\s]*マンション|[^\s]*タワー)?\s*\d*(?:F|階|号室)?.*$/i, '').trim(),
+    ].filter(Boolean))];
+    for (const candidate of candidates) {
+      const result = await new Promise(resolve => {
+        let settled = false;
+        const finish = value => {
+          if (settled) return;
+          settled = true;
+          resolve(value || null);
+        };
+        const timer = setTimeout(() => finish(null), 15000);
+        try {
+          getLatLng(
+            candidate,
+            value => { clearTimeout(timer); finish(value); },
+            () => { clearTimeout(timer); finish(null); }
+          );
+        } catch (error) {
+          clearTimeout(timer);
+          console.error('Community geocoder error:', error);
+          finish(null);
+        }
+      });
+      const coords = coordinatesFromValues(result?.lat, result?.lng);
+      // 市区町村や都道府県の代表点は飲食店のピンとして粗すぎるため、町丁目まで判別できた場合だけ採用する。
+      if (coords && Number(result?.level) >= 3) {
+        return { ...coords, source: 'geolonia', accuracy: 'town' };
       }
-    });
-    const coords = coordinatesFromValues(result?.lat, result?.lng);
-    // 市区町村や都道府県の代表点は飲食店のピンとして粗すぎるため、町丁目まで判別できた場合だけ採用する。
-    if (!coords || Number(result?.level) < 3) return null;
-    return { ...coords, source: 'geolonia', accuracy: 'town' };
+    }
+    return null;
   } catch (error) {
     console.error('Community geocoder load error:', error);
     return null;
@@ -934,9 +908,14 @@ async function saveRecord(event) {
   }
 }
 
-async function openDetail(id) {
+async function openDetail(id, options = {}) {
   const record = state.records.find(r => r.id === id);
   if (!record) return;
+  if (!options.fromHistory) {
+    const url = new URL(location.href); url.searchParams.set('record', id);
+    history.pushState({}, '', `${url.pathname}${url.search}${url.hash}`);
+    state.detailHistoryActive = true;
+  }
   state.galleryIndex = 0;
   renderDetail(record, { locating: !recordCoordinates(record) && Boolean(record.address) });
   $('#detailDialog').showModal();
@@ -961,6 +940,11 @@ async function openDetail(id) {
       if (status) status.textContent = '住所から位置を取得できませんでした。地図で開くと店名と住所で検索します。';
     }
   }
+}
+
+function closeDetail() {
+  if (new URL(location.href).searchParams.has('record')) history.back();
+  else $('#detailDialog').close();
 }
 
 function renderDetail(record, options = {}) {
@@ -1020,13 +1004,18 @@ function renderDetail(record, options = {}) {
   observeGooglePhotoTargets(content);
 
   if (coords && $('#detailMap')) {
-    setTimeout(() => {
-      if (state.detailMap) { state.detailMap.remove(); state.detailMap = null; }
-      state.detailMap = L.map('detailMap', { zoomControl: false, attributionControl: false, dragging: false, scrollWheelZoom: false }).setView([coords.lat, coords.lng], 15);
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(state.detailMap);
-      L.marker([coords.lat, coords.lng], { icon: markerIcon(record.status) }).addTo(state.detailMap);
+    if (!googleMapsConfigured()) {
+      $('#detailMap').innerHTML = '<div class="map-empty"><span>地図を表示するには設定画面でGoogle Maps APIキーを保存してください。</span></div>';
+    } else setTimeout(async () => {
+      try {
+        await loadGoogleMapsApi();
+        const { Map } = await google.maps.importLibrary('maps');
+        state.detailMap = new Map($('#detailMap'), { center: coords, zoom: 16, mapTypeControl: false, streetViewControl: false, fullscreenControl: false });
+        new google.maps.Marker({ map: state.detailMap, position: coords, title: record.name });
+      } catch { $('#detailMap').innerHTML = '<div class="map-empty"><span>Google Mapsを読み込めませんでした。</span></div>'; }
     }, 50);
   }
+
 }
 
 async function shareRecord(record, mapsUrl) {
@@ -1267,10 +1256,14 @@ async function importMogureco() {
 }
 
 function setupEvents() {
+  $('#brandHome').addEventListener('click', event => {
+    event.preventDefault();
+    setView('records');
+  });
   $$('.nav-button').forEach(button => button.addEventListener('click', () => setView(button.dataset.view)));
   $('#addButton').addEventListener('click', () => openRecordDialog());
   $$('.close-dialog').forEach(button => button.addEventListener('click', closeRecordDialog));
-  $$('.close-detail').forEach(button => button.addEventListener('click', () => $('#detailDialog').close()));
+  $$('.close-detail').forEach(button => button.addEventListener('click', closeDetail));
   $('#recordForm').addEventListener('submit', saveRecord);
   $('#searchInput').addEventListener('input', event => { state.query = event.target.value; renderTimeline(); });
   $$('.filter-button').forEach(button => button.addEventListener('click', () => {
@@ -1307,8 +1300,12 @@ function setupEvents() {
   $('#locateButton').addEventListener('click', async () => {
     try {
       const pos = await getCurrentPosition();
-      state.map.setView(pos, 15);
-      L.circleMarker(pos, { radius: 7, color: '#2767b1', fillColor: '#fff', fillOpacity: 1, weight: 4 }).addTo(state.mapLayer).bindPopup('現在地').openPopup();
+      if (!state.map) await initMap();
+      if (!state.map) return;
+      const position = { lat: pos[0], lng: pos[1] };
+      state.map.setCenter(position); state.map.setZoom(15);
+      state.currentLocationMarker?.setMap(null);
+      state.currentLocationMarker = new google.maps.Marker({ map: state.map, position, title: '現在地' });
     } catch { showToast('現在地を取得できませんでした'); }
   });
   $('#exportButton').addEventListener('click', exportBackup);
@@ -1326,7 +1323,8 @@ function setupEvents() {
     showToast('全データを削除しました');
   });
   $('#recordDialog').addEventListener('click', event => { if (event.target === $('#recordDialog')) closeRecordDialog(); });
-  $('#detailDialog').addEventListener('click', event => { if (event.target === $('#detailDialog')) $('#detailDialog').close(); });
+  $('#detailDialog').addEventListener('click', event => { if (event.target === $('#detailDialog')) closeDetail(); });
+  $('#detailDialog').addEventListener('cancel', event => { event.preventDefault(); closeDetail(); });
 
   window.addEventListener('beforeinstallprompt', event => {
     event.preventDefault();
@@ -1346,11 +1344,10 @@ function setupEvents() {
 async function normalizeStoredCoordinates() {
   const records = await dbGetAll();
   for (const record of records) {
-    const coords = recordCoordinates(record);
-    const lat = coords?.lat ?? null;
-    const lng = coords?.lng ?? null;
-    if (record.lat !== lat || record.lng !== lng) {
-      await dbPut({ ...record, lat, lng });
+    const normalized = normalizeRecordCoordinates(record);
+    if (record.lat !== normalized.lat || record.lng !== normalized.lng) {
+      // Spread-based normalization changes coordinates only and preserves all legacy fields/photos.
+      await dbPut(normalized);
     }
   }
 }
@@ -1362,8 +1359,13 @@ async function init() {
     updateGoogleSettingsUi();
     await normalizeStoredCoordinates();
     await refreshRecords();
+    router.start(window);
     await updateStorageStatus();
-    if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('./sw.js').catch(console.warn);
+    if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+      navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' })
+        .then(registration => registration.update())
+        .catch(console.warn);
+    }
   } catch (error) {
     console.error(error);
     document.body.innerHTML = '<main><div class="empty-state"><h2>アプリを起動できませんでした</h2><p>ブラウザーのプライベートモードや保存設定を確認してください。</p></div></main>';

@@ -1256,6 +1256,10 @@ async function importMogureco() {
 }
 
 function setupEvents() {
+  $('#brandHome').addEventListener('click', event => {
+    event.preventDefault();
+    setView('records');
+  });
   $$('.nav-button').forEach(button => button.addEventListener('click', () => setView(button.dataset.view)));
   $('#addButton').addEventListener('click', () => openRecordDialog());
   $$('.close-dialog').forEach(button => button.addEventListener('click', closeRecordDialog));

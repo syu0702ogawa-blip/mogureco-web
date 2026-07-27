@@ -1,13 +1,13 @@
 const CACHE_PREFIX = 'gaishoku-reco-';
-const CACHE = `${CACHE_PREFIX}v7`;
+const CACHE = `${CACHE_PREFIX}v8`;
 const SHELL = [
   './',
   './index.html',
-  './styles.css?v=7',
+  './styles.css?v=8',
   './location-utils.js?v=1',
   './navigation-utils.js?v=1',
   './google-maps-loader.js?v=1',
-  './app.js?v=7',
+  './app.js?v=8',
   './manifest.webmanifest',
   './assets/icon-192.png',
   './assets/icon-512.png'

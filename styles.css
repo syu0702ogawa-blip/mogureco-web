@@ -366,3 +366,83 @@ main { padding-top:38px; }
   .fab { bottom:calc(16px + var(--safe-bottom)); border-color:var(--bg); }
   .map-canvas { height:calc(100vh - 210px); border-radius:8px; }
 }
+
+/* Modern monochrome edition */
+:root {
+  --bg: #f4f4f2;
+  --surface: #ffffff;
+  --surface-2: #f0f0ed;
+  --ink: #101010;
+  --muted: #6c6c68;
+  --line: #d9d9d4;
+  --accent: #111111;
+  --accent-dark: #000000;
+  --accent-soft: #e9e9e5;
+  --gold: #a58950;
+  --success: #315c43;
+  --shadow: 0 18px 50px rgba(0, 0, 0, .08);
+}
+html { background: #0b0b0b; }
+body {
+  background:
+    radial-gradient(ellipse at 8% 0%, rgba(255,255,255,.95) 0, rgba(255,255,255,0) 38%),
+    repeating-linear-gradient(115deg, rgba(0,0,0,.014) 0 1px, transparent 1px 10px),
+    linear-gradient(145deg, #fafafa 0%, #eeeeeb 100%);
+  font-family: Inter, "Helvetica Neue", "Hiragino Sans", "Yu Gothic UI", YuGothic, sans-serif;
+  letter-spacing: .015em;
+}
+.app-header {
+  min-height: 78px;
+  background: rgba(255,255,255,.88);
+  border-bottom: 1px solid rgba(0,0,0,.12);
+  box-shadow: 0 4px 28px rgba(0,0,0,.035);
+  backdrop-filter: blur(22px) saturate(150%);
+}
+.brand-wrap { color: var(--ink); text-decoration: none; border-radius: 6px; transition: opacity .2s ease; }
+.brand-wrap:hover { opacity: .64; }
+.brand-wrap:focus-visible { outline: 2px solid var(--ink); outline-offset: 5px; }
+.brand-mark { background: #0a0a0a; border: 1px solid #0a0a0a; border-radius: 4px; box-shadow: none; }
+.brand-wrap h1 { font-family: Georgia, "Yu Mincho", serif; font-weight: 500; letter-spacing: .12em; }
+.brand-wrap p { letter-spacing: .08em; }
+.header-tabs .nav-button { color: #787875; font-size: .8rem; letter-spacing: .16em; }
+.header-tabs .nav-button.active { color: #050505; }
+.header-tabs .nav-button.active::after { height: 1px; background: #050505; }
+.hero-panel {
+  border: 1px solid #242424;
+  background:
+    radial-gradient(circle at 84% 20%, rgba(255,255,255,.13), transparent 23%),
+    linear-gradient(122deg, #050505 0%, #242424 62%, #080808 100%);
+  box-shadow: 0 26px 70px rgba(0,0,0,.19);
+}
+.hero-panel::after { border-color: rgba(197,169,105,.24); box-shadow: 0 0 0 35px rgba(197,169,105,.025), 0 0 0 70px rgba(255,255,255,.018); }
+.hero-panel .eyebrow, .eyebrow { color: var(--gold); }
+.hero-panel h2, .section-heading h2, .month-heading h3, .detail-body h2 { font-family: Georgia, "Yu Mincho", serif; font-weight: 500; letter-spacing: .035em; }
+.stats div { border-radius: 4px; background: rgba(255,255,255,.055); border-color: rgba(255,255,255,.2); }
+.search-box input, .form-grid input, .form-grid select, textarea, .settings-field input, .import-fields input {
+  border-radius: 4px; border-color: #d4d4cf; box-shadow: none; background: rgba(255,255,255,.92);
+}
+.search-box input:focus, .form-grid input:focus, .form-grid select:focus, textarea:focus, .settings-field input:focus { border-color: #111; }
+.segmented { border-radius: 5px; background: #e7e7e3; }
+.filter-button { border-radius: 3px; }
+.filter-button.active { color: #080808; box-shadow: 0 2px 8px rgba(0,0,0,.09); }
+.record-card, .settings-card { border-color: #d8d8d2; box-shadow: 0 10px 35px rgba(0,0,0,.055); }
+.record-card:hover { transform: translateY(-4px); border-color: #afafa9; box-shadow: 0 20px 45px rgba(0,0,0,.11); }
+.card-image, .detail-gallery { background: linear-gradient(140deg, #e7e7e4, #b9b9b3); }
+.status-badge.visited { background: rgba(12,12,12,.88); }
+.status-badge.wishlist { color: #111; background: rgba(255,255,255,.92); }
+.tag-chip, .detail-fact, .setting-status, .privacy-note { border-radius: 4px; }
+.primary-button { background: #0b0b0b; box-shadow: 0 6px 16px rgba(0,0,0,.14); }
+.primary-button:hover { background: #333; }
+.secondary-button, .ghost-button { color: #111; background: rgba(255,255,255,.8); border-color: #c9c9c4; }
+.secondary-button:hover, .ghost-button:hover { border-color: #111; }
+.fab { background: #080808; border-color: #f4f4f2; box-shadow: 0 14px 34px rgba(0,0,0,.25); }
+.record-dialog form, .detail-shell, .confirm-dialog form { border: 1px solid rgba(255,255,255,.7); box-shadow: 0 28px 90px rgba(0,0,0,.26); }
+::backdrop { background: rgba(0,0,0,.66); }
+.map-canvas { border-color: #c8c8c2; background: #deded9; filter: grayscale(.72) contrast(1.03); }
+.map-canvas .map-empty { filter: none; }
+.toast { background: #080808; border: 1px solid #333; }
+@media (max-width: 680px) {
+  .app-header { min-height: 0; }
+  .hero-panel { border-radius: 6px; }
+  .record-card, .settings-card { border-radius: 6px; }
+}
